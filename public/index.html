@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>🪙 Arena Koin — Multiplayer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0b0b10; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #wrap { position: relative; width: min(100vw, calc(100vh * 1000 / 620)); }
+  canvas {
+    width: 100%; display: block; border-radius: 12px;
+    background: #0d0d14; touch-action: none;
+    box-shadow: 0 0 60px rgba(124, 92, 252, .15);
+  }
+
+  /* ---- overlay join ---- */
+  #join {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(8, 8, 14, .94); backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #join .card {
+    text-align: center; padding: 2.2rem 2.4rem; width: min(92vw, 360px);
+    background: #14141d; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 20px;
+  }
+  #join h1 { font-size: 1.6rem; margin-bottom: .3rem; }
+  #join p  { color: #8b8b9e; font-size: .85rem; margin-bottom: 1.4rem; }
+  #join input {
+    width: 100%; padding: .8rem 1rem; font-size: 1rem; color: #fff;
+    background: #0d0d14; border: 1px solid rgba(255,255,255,.15);
+    border-radius: 12px; outline: none; text-align: center;
+  }
+  #join input:focus { border-color: #7c5cfc; }
+  #join button {
+    width: 100%; margin-top: .8rem; padding: .85rem; font-size: 1rem;
+    font-weight: 700; color: #fff; background: linear-gradient(135deg, #7c5cfc, #00d4d4);
+    border: none; border-radius: 12px; cursor: pointer;
+  }
+  #join button:active { transform: scale(.97); }
+  #join .hint { margin-top: 1rem; font-size: .75rem; color: #6b6b80; line-height: 1.5; }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: absolute; top: 10px; right: 10px; z-index: 10;
+    background: rgba(10,10,18,.75); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+    padding: .6rem .9rem; font-size: .78rem; min-width: 130px;
+  }
+  #hud h3 { font-size: .7rem; color: #8b8b9e; letter-spacing: 1px; margin-bottom: .35rem; }
+  #hud .row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+  #hud .row.me { color: #00d4d4; font-weight: 700; }
+  #score {
+    position: absolute; top: 10px; left: 10px; z-index: 10;
+    background: rgba(10,10,18,.75); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+    padding: .5rem .9rem; font-size: .85rem; font-weight: 700;
+  }
+  #status {
+    position: absolute; bottom: 10px; right: 10px; z-index: 10;
+    font-size: .68rem; color: #8b8b9e; background: rgba(10,10,18,.6);
+    padding: .3rem .6rem; border-radius: 8px;
+  }
+
+  /* ---- chat ---- */
+  #chatbox {
+    position: absolute; left: 10px; bottom: 10px; z-index: 10; width: min(46%, 260px);
+  }
+  #msgs { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+  #msgs .m {
+    font-size: .74rem; background: rgba(10,10,18,.75);
+    border: 1px solid rgba(255,255,255,.08);
+    padding: .28rem .55rem; border-radius: 8px;
+    width: fit-content; max-width: 100%; word-break: break-word;
+  }
+  #msgs .m b { font-weight: 700; }
+  #chatIn {
+    width: 100%; padding: .45rem .7rem; font-size: .78rem; color: #fff;
+    background: rgba(10,10,18,.8); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 9px; outline: none;
+  }
+  #chatIn:focus { border-color: #7c5cfc; }
+</style>
+</head>
+<body>
+
+<div id="join">
+  <div class="card">
+    <h1>🪙 Arena Koin</h1>
+    <p>game multiplayer • WebSocket real-time</p>
+    <input id="nameIn" maxlength="14" placeholder="Nama kamu" autocomplete="off">
+    <button id="playBtn">▶ Main</button>
+    <div class="hint">Gerak: <b>WASD / panah</b> atau <b>ketuk layar</b><br>Kumpulkan koin 🪙 sebanyak mungkin!</div>
+  </div>
+</div>
+
+<div id="wrap">
+  <canvas id="cv" width="1000" height="620"></canvas>
+  <div id="score">🪙 <span id="myScore">0</span></div>
+  <div id="hud"><h3>🏆 PEMAIN</h3><div id="lb"></div></div>
+  <div id="status">⏳ menghubungkan…</div>
+  <div id="chatbox">
+    <div id="msgs"></div>
+    <input id="chatIn" placeholder="💬 ketik pesan…" maxlength="120" autocomplete="off">
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+/* ============================================================
+ *  CLIENT — cuma 3 tugas:
+ *  1. kirim input arah  2. terima state & gambar  3. chat
+ * ============================================================ */
+const socket = io(); // konek ke server yang sama (WebSocket)
+
+const cv  = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let WORLD = { w: 1000, h: 620 };
+
+let myId = null;
+let myName = "";
+let state = { players: [], coins: [] };       // data terbaru dari server
+const disp = new Map();                        // posisi gambar (di-lerp biar mulus)
+
+/* ---------- JOIN ---------- */
+document.getElementById("playBtn").onclick = join;
+document.getElementById("nameIn").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") join();
+});
+function join() {
+  myName = document.getElementById("nameIn").value.trim() || "Anonim";
+  socket.emit("join", myName);
+}
+
+socket.on("joined", (d) => {
+  myId = d.id;
+  WORLD = d.world;
+  document.getElementById("join").style.display = "none";
+});
+
+/* ---------- INPUT: keyboard + tap/klik ----------
+ * Client TIDAK menggerakkan pemain — cuma bilang mau ke arah mana.
+ * Yang menggerakkan = server (lihat game loop di server.js). */
+const keys = {};
+let target = null; // titik tujuan ketika tap/klik
+
+addEventListener("keydown", (e) => {
+  if (document.activeElement === chatIn) return; // lagi ngetik chat
+  keys[e.key.toLowerCase()] = true;
+});
+addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
+
+cv.addEventListener("pointerdown", (e) => {
+  const r = cv.getBoundingClientRect();
+  target = {
+    x: (e.clientX - r.left) / r.width * WORLD.w,
+    y: (e.clientY - r.top) / r.height * WORLD.h,
+  };
+});
+
+function hitungArah() {
+  let dx = 0, dy = 0;
+  if (keys["w"] || keys["arrowup"])    dy -= 1;
+  if (keys["s"] || keys["arrowdown"])  dy += 1;
+  if (keys["a"] || keys["arrowleft"])  dx -= 1;
+  if (keys["d"] || keys["arrowright"]) dx += 1;
+  if (dx || dy) { target = null; return norm(dx, dy); } // keyboard prioritas
+  if (target) { // masih menuju titik tap?
+    const me = state.players.find((p) => p.id === myId);
+    if (me) {
+      const tx = target.x - me.x, ty = target.y - me.y;
+      if (Math.hypot(tx, ty) < 10) { target = null; return { dx: 0, dy: 0 }; }
+      return norm(tx, ty);
+    }
+  }
+  return { dx: 0, dy: 0 };
+}
+function norm(dx, dy) { const l = Math.hypot(dx, dy) || 1; return { dx: dx / l, dy: dy / l }; }
+
+// kirim arah ke server secara berkala (input-nya "lengket" di server)
+setInterval(() => { if (myId) socket.emit("input", hitungArah()); }, 120);
+
+/* ---------- STATE dari server ---------- */
+socket.on("state", (s) => { state = s; });
+
+socket.on("disconnect", () => { statusEl.textContent = "⚡ koneksi putus, menyambung ulang…"; });
+socket.on("connect", () => {
+  statusEl.textContent = "🟢 online";
+  if (myName) socket.emit("join", myName); // rejoin setelah reconnect
+});
+
+/* ---------- CHAT ---------- */
+const chatIn = document.getElementById("chatIn");
+const msgsEl = document.getElementById("msgs");
+chatIn.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const t = chatIn.value.trim();
+  if (t) socket.emit("chat", t);
+  chatIn.value = "";
+  chatIn.blur();
+});
+socket.on("chat", (d) => {
+  const div = document.createElement("div");
+  div.className = "m";
+  div.innerHTML = `<b style="color:${d.color}">${esc(d.name)}</b> ${esc(d.msg)}`;
+  msgsEl.appendChild(div);
+  while (msgsEl.children.length > 6) msgsEl.removeChild(msgsEl.firstChild);
+});
+function esc(s) { return s.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])); }
+
+/* ---------- LEADERBOARD ---------- */
+const statusEl = document.getElementById("status");
+setInterval(() => {
+  const sorted = [...state.players].sort((a, b) => b.score - a.score).slice(0, 5);
+  document.getElementById("lb").innerHTML = sorted.map((p) =>
+    `<div class="row ${p.id === myId ? "me" : ""}">
+       <span>${p.id === myId ? "KAMU" : esc(p.name)}</span><span>🪙${p.score}</span>
+     </div>`).join("") || '<div class="row"><span>sepi…</span></div>';
+  const me = state.players.find((p) => p.id === myId);
+  document.getElementById("myScore").textContent = me ? me.score : 0;
+}, 300);
+
+/* ---------- RENDER (gambar terus, 60fps) ---------- */
+function draw() {
+  ctx.clearRect(0, 0, WORLD.w, WORLD.h);
+
+  // latar grid
+  ctx.strokeStyle = "rgba(255,255,255,.04)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x < WORLD.w; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD.h); ctx.stroke(); }
+  for (let y = 0; y < WORLD.h; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD.w, y); ctx.stroke(); }
+
+  // koin (denyut biar hidup)
+  const t = Date.now() / 300;
+  for (const c of state.coins) {
+    const r = 11 + Math.sin(t + c.x) * 2;
+    ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 7); ctx.fillStyle = "#ffd32a"; ctx.fill();
+    ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.55, 0, 7); ctx.fillStyle = "#ffea88"; ctx.fill();
+    ctx.shadowColor = "rgba(255,211,42,.6)"; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 7); ctx.fillStyle = "rgba(255,211,42,.25)"; ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // pemain
+  for (const p of state.players) {
+    // lerp: posisi gambar mendekat ke posisi server biar mulus
+    if (!disp.has(p.id)) disp.set(p.id, { x: p.x, y: p.y });
+    const d = disp.get(p.id);
+    d.x += (p.x - d.x) * 0.3;
+    d.y += (p.y - d.y) * 0.3;
+
+    if (p.id === myId) { // ring highlight milik sendiri
+      ctx.beginPath(); ctx.arc(d.x, d.y, 24, 0, 7);
+      ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.beginPath(); ctx.arc(d.x, d.y, 17, 0, 7);
+    ctx.fillStyle = p.color; ctx.fill();
+    ctx.beginPath(); ctx.arc(d.x, d.y, 17, 0, 7);
+    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 2; ctx.stroke();
+
+    // nama + skor
+    ctx.font = "700 12px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,.92)";
+    ctx.fillText(p.name, d.x, d.y - 26);
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.fillText("🪙" + p.score, d.x, d.y - 13 + 24);
+  }
+
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
